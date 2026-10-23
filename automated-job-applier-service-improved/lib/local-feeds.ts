@@ -43,20 +43,50 @@ function decode(text: string) {
 
 const strip = (html: string) => decode(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 
-function tag(block: string, name: string) {
-  const match = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, 'i'))
-  return match ? match[1] : ''
+function extractLinks(html: string) {
+  const links = [...html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)]
+  return links
+    .map((match) => ({ href: match[1], text: strip(match[2] || '') }))
+    .filter(({ href }) => /^https?:\/\//i.test(href))
 }
 
-function splitTitle(title: string, fallback: string) {
-  const match = title.match(/^(.*?)\s+(?:at|@|-|–|\|)\s+(.+)$/i)
-  return match ? { role: match[1].trim(), company: match[2].trim() } : { role: title, company: fallback }
+function inferRole(text: string) {
+  const normalized = text.toLowerCase()
+  const candidates = [
+    'software developer',
+    'software engineer',
+    'frontend developer',
+    'backend developer',
+    'full stack developer',
+    'data analyst',
+    'systems administrator',
+    'system administrator',
+    'network engineer',
+    'it officer',
+    'it support',
+    'technical support',
+    'web developer',
+    'developer',
+    'programmer',
+    'ict',
+    'helpdesk',
+    'help desk',
+  ]
+
+  const found = candidates.find((candidate) => normalized.includes(candidate))
+  return found ? found.charAt(0).toUpperCase() + found.slice(1) : 'IT Opportunity'
+}
+
+function inferCompany(text: string, fallback: string) {
+  const value = strip(text)
+  if (!value) return fallback
+  return value.replace(/\s*[-|–:]\s*.*$/, '').trim() || fallback
 }
 
 export async function fetchSource(source: LocalSource, signal: AbortSignal): Promise<LocalJob[]> {
   const res = await fetch(source.url, {
     headers: {
-      Accept: 'application/rss+xml, application/xml, text/xml',
+      Accept: 'text/html,application/xhtml+xml,application/xml,text/xml',
       'User-Agent': 'CareerPilot/1.0 job-discovery',
     },
     signal,
@@ -65,32 +95,39 @@ export async function fetchSource(source: LocalSource, signal: AbortSignal): Pro
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
-  const xml = await res.text()
-  const blocks = xml.match(/<(item|entry)[\s>][\s\S]*?<\/\1>/gi) || []
-  if (!blocks.length) throw new Error('No items found (not an RSS/Atom feed?)')
+  const html = await res.text()
+  const links = extractLinks(html)
+  if (!links.length) throw new Error('No job links found in HTML')
 
-  return blocks.slice(0, 40).flatMap((block, index) => {
-    const title = strip(tag(block, 'title'))
-    const link = strip(tag(block, 'link')) || (block.match(/<link[^>]*href="([^"]+)"/i)?.[1] ?? '')
-    if (!title || !/^https?:\/\//.test(link)) return []
+  const seen = new Set<string>()
+  const items: LocalJob[] = []
 
-    const description = strip(
-      tag(block, 'content:encoded') || tag(block, 'description') || tag(block, 'summary') || tag(block, 'content'),
-    ).slice(0, 4000)
+  for (const link of links.slice(0, 40)) {
+    const href = link.href
+    const text = link.text || source.name
+    if (!href || seen.has(href)) continue
+    seen.add(href)
 
-    const { role, company } = splitTitle(title, source.name)
-    const date = new Date(strip(tag(block, 'pubDate') || tag(block, 'updated') || tag(block, 'published')))
+    const lower = `${href} ${text}`.toLowerCase()
+    const isJobish = /job|career|vacancy|opportunity|apply|recruit|employment/.test(lower)
+    if (!isJobish) continue
 
-    return [{
-      id: `${source.name}-${index}-${link}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 120),
+    const role = inferRole(text)
+    const company = inferCompany(text, source.name)
+    const description = `${role} opportunity in Zimbabwe.`
+
+    items.push({
+      id: `${source.name}-${href}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 120),
       company,
       role,
       location: 'Zimbabwe',
-      url: link,
+      url: href,
       description,
-      postedAt: Number.isNaN(date.getTime()) ? null : date.toISOString(),
+      postedAt: null,
       source: source.name,
       applyEmail: description.match(EMAIL_RE)?.[0] ?? null,
-    }]
-  })
+    })
+  }
+
+  return items
 }
