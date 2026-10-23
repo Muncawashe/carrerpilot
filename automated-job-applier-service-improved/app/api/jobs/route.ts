@@ -214,7 +214,7 @@ function pickLocationFromText(text: string): string {
 }
 
 function extractLocalJobsFromHtml(html: string, sourceName: string, pageUrl: string): Array<{ role: string; company: string; location: string; url: string }> {
-  const matches = Array.from(html.matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gis))
+  const matches = Array.from(html.matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi))
   const jobs: Array<{ role: string; company: string; location: string; url: string }> = []
 
   for (const match of matches) {
@@ -386,4 +386,3 @@ export async function GET() {
     )
   }
 }
-
