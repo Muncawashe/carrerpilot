@@ -121,6 +121,14 @@ type NormalizedJob = {
   postedAt: string | null
 }
 
+type LocalDebugStatus = {
+  source: string
+  url: string
+  ok: boolean
+  items: number
+  error?: string
+}
+
 function asText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -278,12 +286,14 @@ function extractLocalJobsFromHtml(html: string, sourceName: string, pageUrl: str
   return jobs
 }
 
-async function fetchLocalZimbabweJobs(): Promise<NormalizedJob[]> {
+async function fetchLocalZimbabweJobs(): Promise<{ jobs: NormalizedJob[]; status: LocalDebugStatus[] }> {
   const seenUrls = new Set<string>()
   const jobs: NormalizedJob[] = []
+  const status: LocalDebugStatus[] = []
 
   for (const site of LOCAL_JOB_SITES) {
     for (const url of site.urls) {
+      const entry: LocalDebugStatus = { source: site.name, url, ok: false, items: 0 }
       try {
         const response = await fetch(url, {
           headers: {
@@ -293,10 +303,17 @@ async function fetchLocalZimbabweJobs(): Promise<NormalizedJob[]> {
           signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         })
 
-        if (!response.ok) continue
+        entry.ok = response.ok
+        if (!response.ok) {
+          entry.error = `HTTP ${response.status}`
+          status.push(entry)
+          continue
+        }
 
         const html = await response.text()
         const extracted = extractLocalJobsFromHtml(html, site.name, url)
+        entry.items = extracted.length
+        status.push(entry)
 
         for (const listing of extracted) {
           if (seenUrls.has(listing.url)) continue
@@ -321,13 +338,14 @@ async function fetchLocalZimbabweJobs(): Promise<NormalizedJob[]> {
             postedAt: null,
           })
         }
-      } catch {
-        continue
+      } catch (error) {
+        entry.error = error instanceof Error ? error.message : 'Unknown error'
+        status.push(entry)
       }
     }
   }
 
-  return jobs
+  return { jobs, status }
 }
 
 async function fetchArbeitnowJobs(): Promise<NormalizedJob[]> {
@@ -359,23 +377,32 @@ async function fetchArbeitnowJobs(): Promise<NormalizedJob[]> {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const debug = new URL(request.url).searchParams.get('debug') === '1'
   try {
-    const [arbeitnowJobs, localJobs] = await Promise.all([
+    const [arbeitnowJobs, localInfo] = await Promise.all([
       fetchArbeitnowJobs(),
       fetchLocalZimbabweJobs(),
     ])
 
-    const merged = [...arbeitnowJobs, ...localJobs]
+    const merged = [...arbeitnowJobs, ...localInfo.jobs]
       .sort((a, b) => b.match - a.match)
       .slice(0, MAX_JOBS)
 
+    const response = {
+      jobs: merged,
+      source: 'mixed',
+      localMatches: localInfo.jobs.length,
+      localSources: localInfo.status,
+      fetchedAt: new Date().toISOString(),
+    }
+
+    if (debug) {
+      return NextResponse.json(response)
+    }
+
     return NextResponse.json(
-      {
-        jobs: merged,
-        source: 'mixed',
-        fetchedAt: new Date().toISOString(),
-      },
+      response,
       { headers: { 'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=1800' } },
     )
   } catch (error) {
