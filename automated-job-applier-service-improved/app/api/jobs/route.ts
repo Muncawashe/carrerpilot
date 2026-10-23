@@ -77,6 +77,22 @@ const LOCAL_JOB_SITES = [
       'https://www.jobsinzimbabwe.co.zw/?s=it',
     ],
   },
+  {
+    name: 'Vacancy Mail Zimbabwe',
+    urls: [
+      'https://www.vacancymail.co.zw/?s=software',
+      'https://www.vacancymail.co.zw/?s=developer',
+      'https://www.vacancymail.co.zw/?s=it',
+    ],
+  },
+  {
+    name: 'VacancyBox',
+    urls: [
+      'https://www.vacancybox.co.zw/?s=software',
+      'https://www.vacancybox.co.zw/?s=developer',
+      'https://www.vacancybox.co.zw/?s=it',
+    ],
+  },
 ] as const
 
 type FeedJob = {
@@ -245,7 +261,10 @@ function extractLocalJobsFromHtml(html: string, sourceName: string, pageUrl: str
     if (!matchingRole) continue
 
     const company = normalizeCompanyName(
-      inner.split(/[-|–]|\s{2,}/).find((part) => !/software|developer|engineer|support|frontend|backend|full stack|it|data|analyst|react|python|javascript|vacancy|job|career|apply/i.test(part)) || sourceName,
+      inner
+        .split(/[-|–]|\s{2,}/)
+        .find((part) => !/software|developer|engineer|support|frontend|backend|full stack|it|data|analyst|react|python|javascript|vacancy|job|career|apply/i.test(part)) ||
+        sourceName,
     )
 
     jobs.push({
